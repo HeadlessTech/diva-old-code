@@ -74,6 +74,10 @@ SSLClientParameters mTLS = SSLClientParameters::fromPEM(my_cert, sizeof my_cert,
 
 void initializeSSL() {
   Serial.printf("Free heap before initializeSSL: %d\n", ESP.getFreeHeap());
+  // Diagnostics only: SSLClient needs one contiguous block, which a total
+  // free-heap figure does not guarantee.
+  Serial.printf("Largest free block: %u (SSLClient: %u)\n",
+                (unsigned)ESP.getMaxAllocHeap(), (unsigned)sizeof(SSLClient));
 
   // Check if memory is critically low before initializing SSL
   if (ESP.getFreeHeap() < 55000) {  // Set a low memory threshold, e.g., 70 KB
@@ -104,5 +108,7 @@ void initializeSSL() {
   delay(200U);  // Short delay for memory stabilization
 
   Serial.printf("Free heap after initializeSSL: %d\n", ESP.getFreeHeap());
+  Serial.printf("Min free heap: %u, loop stack left: %u\n",
+                (unsigned)ESP.getMinFreeHeap(), (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }
 

@@ -129,7 +129,10 @@ static void clockFormat(uint32_t unixTime, char* out, size_t outLen) {
   time_t t = (time_t)unixTime;
   struct tm tmUtc;
   gmtime_r(&t, &tmUtc);
-  strftime(out, outLen, "%Y-%m-%d %H:%M:%S UTC", &tmUtc);
+  // snprintf with integers only (no strftime, no float formatting).
+  snprintf(out, outLen, "%04d-%02d-%02d %02d:%02d:%02d UTC",
+           tmUtc.tm_year + 1900, tmUtc.tm_mon + 1, tmUtc.tm_mday,
+           tmUtc.tm_hour, tmUtc.tm_min, tmUtc.tm_sec);
 }
 
 static const char* clockSourceName(ClockSource src) {
@@ -145,15 +148,18 @@ static const char* clockSourceName(ClockSource src) {
 // NVS
 // ---------------------------------------------------------------------------
 
+// Retried on every use until it succeeds: a failed begin() (e.g. a transient
+// allocation failure inside nvs_open) must not disable saving for the boot.
 static void clockOpenNvs() {
   if (!clockNvsOpen) {
-    clockNvs.begin("clock", false);
-    clockNvsOpen = true;
+    clockNvsOpen = clockNvs.begin("clock", false);
+    if (!clockNvsOpen) Serial.println("[clock] NVS open failed; will retry");
   }
 }
 
 static uint32_t clockLoadSaved() {
   clockOpenNvs();
+  if (!clockNvsOpen) return 0;
   return clockNvs.getUInt("unix", 0);
 }
 
@@ -167,12 +173,13 @@ static void clockSave(uint32_t unixTime, bool authoritative) {
   return;
 #else
   if (!clockIsPlausible((int64_t)unixTime)) return;
+  clockLastSavedAtMs = millis();  // a failure is retried at the next interval, not every loop
   clockOpenNvs();
+  if (!clockNvsOpen) return;
   const uint32_t stored = clockNvs.getUInt("unix", 0);
   if (authoritative ? unixTime != stored : unixTime > stored) {
-    clockNvs.putUInt("unix", unixTime);
+    if (clockNvs.putUInt("unix", unixTime) == 0) Serial.println("[clock] NVS save failed");
   }
-  clockLastSavedAtMs = millis();
 #endif
 }
 
@@ -242,7 +249,7 @@ static bool clockSyncFromNetworkFor(unsigned long waitMs) {
     }
     delay(200U);
   }
-  Serial.printf("[clock] no Wi-Fi SNTP answer within %lu ms; SNTP keeps trying in the background\n", waitMs);
+  Serial.printf("[clock] no SNTP answer in %lu ms; retrying in background\n", waitMs);
   return false;
 }
 
@@ -264,9 +271,12 @@ static bool clockReadModemUtc(uint32_t& outUnix) {
     Serial.println("[clock] AT+CCLK? returned an invalid date");
     return false;
   }
-  const int32_t tzSeconds = (int32_t)(tz * 3600.0f + (tz >= 0.0f ? 0.5f : -0.5f));
-  const int64_t utc = clockUnixFromCivil(y, mo, d, h, mi, s) - tzSeconds;
-  Serial.printf("[clock] modem clock: %04d-%02d-%02d %02d:%02d:%02d (tz %+.2f h)\n", y, mo, d, h, mi, s, tz);
+  // The modem reports the timezone in quarter hours (TinyGSM divides by 4).
+  // Work in integers: printing a float would make newlib keep a permanent
+  // dtoa buffer on the heap, and production firmware prints no floats.
+  const int32_t tzQuarters = (int32_t)(tz * 4.0f + (tz >= 0.0f ? 0.5f : -0.5f));
+  const int64_t utc = clockUnixFromCivil(y, mo, d, h, mi, s) - (int64_t)tzQuarters * 900LL;
+  Serial.printf("[clock] modem: %04d-%02d-%02d %02d:%02d:%02d tz=%dq\n", y, mo, d, h, mi, s, (int)tzQuarters);
   if (!clockIsPlausible(utc)) {
     Serial.println("[clock] modem clock is not plausible (not synced?)");
     return false;
@@ -297,7 +307,7 @@ static bool clockSyncFromNetwork() {
   if (clockReadModemUtc(unixTime)) {
     const uint32_t saved = clockLoadSaved();
     if (unixTime < saved) {
-      Serial.printf("[clock] modem clock is behind the saved time (%lu < %lu); ignoring it\n",
+      Serial.printf("[clock] modem < saved (%lu<%lu), ignored\n",
                     (unsigned long)unixTime, (unsigned long)saved);
       return false;
     }
@@ -319,11 +329,14 @@ static bool clockAdoptBackgroundSync() {
 // Public API
 // ---------------------------------------------------------------------------
 
+// Log lines are kept under 64 characters per printf: Arduino's printf
+// malloc()s a temporary buffer for anything longer.
 static void clockLogState(const char* when) {
   char buf[32];
   const uint32_t now = clockNowUnix();
   clockFormat(now, buf, sizeof buf);
-  Serial.printf("[clock] %s: source=%s, time=%s (%lu)\n", when, clockSourceName(clockSource), buf, (unsigned long)now);
+  Serial.printf("[clock] %s: source=%s\n", when, clockSourceName(clockSource));
+  Serial.printf("[clock]   time=%s (%lu)\n", buf, (unsigned long)now);
 #ifdef CLOCK_TEST_FORCE_UNIX
   Serial.println("[clock] CLOCK_TEST_FORCE_UNIX is set: TLS uses the forced time");
 #endif
@@ -365,11 +378,16 @@ void clockEnsure() {
     return;
   }
 
-  Serial.printf("[clock] free heap before time sync: %u\n", (unsigned)ESP.getFreeHeap());
+  // Open NVS first: its small permanent allocation then sits below the
+  // temporary ones made during the sync, instead of leaving holes between
+  // them right before initializeSSL() needs one large block.
+  clockOpenNvs();
+
+  Serial.printf("[clock] heap before sync: %u\n", (unsigned)ESP.getFreeHeap());
   const unsigned long start = millis();
   const bool ok = clockSyncFromNetwork();
-  Serial.printf("[clock] time sync %s in %lu ms; free heap after: %u\n",
-                ok ? "succeeded" : "FAILED", (unsigned long)(millis() - start), (unsigned)ESP.getFreeHeap());
+  Serial.printf("[clock] sync %s in %lu ms, heap after: %u\n",
+                ok ? "ok" : "FAILED", (unsigned long)(millis() - start), (unsigned)ESP.getFreeHeap());
   if (!ok) clockUseFallback();
   clockLogState("boot");
 
@@ -386,15 +404,19 @@ bool clockResyncDue() {
   return !clockResyncAttempted || millis() - clockLastResyncAtMs >= CLOCK_RESYNC_COOLDOWN_MS;
 }
 
-// Returns true if a network time was obtained.
+// Returns true only if the time improved: NTP was reached, or the source
+// changed (e.g. saved time -> modem clock). Re-reading the same modem clock is
+// not an improvement, so the caller does not wait on it again.
 bool clockResync() {
   clockResyncAttempted = true;
   clockLastResyncAtMs = millis();
-  Serial.println("[clock] TLS/MQTT failed after TCP connected on a non-NTP time; re-fetching time");
+  Serial.println("[clock] TLS failed on non-NTP time; re-fetching");
+  const ClockSource before = clockSource;
   const bool ok = clockSyncFromNetwork();
   if (!ok) clockUseFallback();
-  clockLogState(ok ? "resync" : "resync failed");
-  return ok;
+  const bool improved = ok && (clockSource == ClockSource::NTP || clockSource != before);
+  clockLogState(improved ? "resync" : "resync, no better time");
+  return improved;
 }
 
 // Call from loop(): keeps the saved fallback time fresh (every 6 h) and

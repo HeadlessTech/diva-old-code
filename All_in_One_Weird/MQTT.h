@@ -129,13 +129,23 @@ void drainInbound(uint8_t passes = 3) {
 #define FW_VERSION "AIO_W " __DATE__ " " __TIME__
 #endif
 
-bool sendCurrentStatus() {
-  StaticJsonDocument<128> doc;
-  doc["message"] = "online";
-  doc["fw"] = FW_VERSION;
+// The status JSON is built with snprintf into a fixed stack buffer (no
+// ArduinoJson document, to keep RAM low). Enforce at compile time that it
+// always fits and is valid JSON: a truncated or unescaped payload would fail
+// JSON.parse on the server and the machine would never show as online.
+#define STATUS_BUFFER_SIZE 64
+constexpr bool fwIsJsonSafe(const char* s) {
+  return *s == '\0' ? true
+       : (*s != '"' && *s != '\\' && (unsigned char)*s >= 0x20 && fwIsJsonSafe(s + 1));
+}
+static_assert(sizeof("{\"message\":\"online\",\"fw\":\"\"}") - 1 + sizeof(FW_VERSION) - 1 < STATUS_BUFFER_SIZE,
+              "FW_VERSION is too long for the status buffer");
+static_assert(fwIsJsonSafe(FW_VERSION), "FW_VERSION must not contain quotes, backslashes or control characters");
 
-  char mqttBuffer[96];
-  serializeJson(doc, mqttBuffer, sizeof mqttBuffer);
+bool sendCurrentStatus() {
+  // e.g. {"message":"online","fw":"AIO_W Nov 22 2026 13:45:50"}  (54 chars)
+  char mqttBuffer[STATUS_BUFFER_SIZE];
+  snprintf(mqttBuffer, sizeof mqttBuffer, "{\"message\":\"online\",\"fw\":\"%s\"}", FW_VERSION);
 
   Serial.println(mqttBuffer);
 
@@ -184,6 +194,7 @@ bool connectMqtt() {
 
   Serial.println("MQTT Connecting ....");
   unsigned long start = millis();
+  bool deadlineExtended = false;
   while (!mqtt.connected()) {
     if (millis() - start > timeoutMs) {  // timeout
       Serial.printf("MQTT connect timeout (%lu ms)\n", timeoutMs);
@@ -210,7 +221,14 @@ bool connectMqtt() {
         SSL_CLIENT_TO_USE->stop();
         if (clockResync()) {
           applyVerificationTime(*SSL_CLIENT_TO_USE);
-          start = millis();  // give the retry the full timeout
+          // Give the new time a full timeout, but only once per call: a
+          // source that keeps "succeeding" (e.g. the modem clock while NTP is
+          // down) must not stop this function from timing out, or the retry
+          // counter, SSL rebuild and reboot recovery would never run.
+          if (!deadlineExtended) {
+            start = millis();
+            deadlineExtended = true;
+          }
         }
       }
       delay(500U);
