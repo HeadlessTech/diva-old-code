@@ -12,7 +12,8 @@
 //
 // This file gets the real time once per boot and hands it to SSLClient:
 //   1. Network time: SIM800 NTP (AT+CNTP) then the modem clock (AT+CCLK?,
-//      network-broadcast time via AT+CLTS=1); or ESP32 SNTP on Wi-Fi.
+//      network-broadcast time via AT+CLTS=1); or ESP32 SNTP on Wi-Fi, which
+//      keeps running in the background and is adopted whenever it answers.
 //   2. Otherwise the last good time saved in NVS (a lower bound, kept fresh
 //      by clockMaintain()).
 //   3. Otherwise the compile date.
@@ -39,6 +40,10 @@
 // modem clock, so the saved time from an earlier boot is used.
 // #define CLOCK_TEST_BOGUS_NTP
 
+#if defined(CLOCK_TEST_FORCE_UNIX) || defined(CLOCK_TEST_BOGUS_NTP)
+#warning "Clock.h test switch enabled: do NOT flash this build to machines in the field"
+#endif
+
 enum class ClockSource : uint8_t {
   COMPILE_DATE,  // nothing better known
   SAVED,         // last good time from NVS (lower bound)
@@ -63,8 +68,13 @@ static constexpr uint32_t CLOCK_MAX_AHEAD_OF_BUILD_S = 20UL * 366UL * 86400UL;  
 static constexpr unsigned long CLOCK_SAVE_INTERVAL_MS = 6UL * 60UL * 60UL * 1000UL;  // 6 h
 static constexpr unsigned long CLOCK_RESYNC_COOLDOWN_MS = 60000UL;
 #ifdef USE_WIFI
-static constexpr unsigned long CLOCK_WIFI_SNTP_WAIT_MS = 10000UL;
-static constexpr uint8_t CLOCK_WIFI_SNTP_ROUNDS = 2;
+// lwIP SNTP waits SNTP_RECV_TIMEOUT (15 s) for a server before trying the
+// next one, after a random start-up delay of up to 5 s. Waiting 22 s at boot
+// lets a dead first server fail over to the second. Anything slower is picked
+// up later by clockAdoptBackgroundSync().
+static constexpr unsigned long CLOCK_WIFI_SNTP_BOOT_WAIT_MS = 22000UL;
+static constexpr unsigned long CLOCK_WIFI_SNTP_RESYNC_WAIT_MS = 5000UL;
+static bool clockSntpStarted = false;
 #endif
 
 static ClockSource clockSource = ClockSource::COMPILE_DATE;
@@ -196,28 +206,48 @@ static void clockSetFromNetwork(uint32_t unixTime, ClockSource src) {
 
 #ifdef USE_WIFI
 
-static bool clockSyncFromNetwork() {
-  for (uint8_t round = 0; round < CLOCK_WIFI_SNTP_ROUNDS; round++) {
+// If background SNTP has set the system time since it was started, switch to
+// it. Only SNTP sets the system time once it is running (it was cleared just
+// before), so a plausible value here is an SNTP answer, not a stale clock.
+// Returns true if the clock is on NTP time.
+static bool clockAdoptBackgroundSync() {
+  if (clockSource == ClockSource::NTP) return true;
+  if (!clockSntpStarted) return false;
+  const time_t now = time(nullptr);
+  if (!clockIsPlausible((int64_t)now)) return false;
+  Serial.println("[clock] Wi-Fi SNTP answered in the background; switching to NTP time");
+  clockSetFromNetwork((uint32_t)now, ClockSource::NTP);
+  return true;
+}
+
+// Starts SNTP once per boot and never restarts it: configTime() stops and
+// re-inits SNTP, which would restart from the first server every time and
+// defeat lwIP's failover to the other servers. SNTP keeps retrying in the
+// background after this returns.
+static bool clockSyncFromNetworkFor(unsigned long waitMs) {
+  if (!clockSntpStarted) {
     // The ESP32 keeps system time across a soft reset, so clear it first and
     // treat only a freshly set, plausible value as an SNTP answer.
     struct timeval zero = { 0, 0 };
     settimeofday(&zero, nullptr);
-
     configTime(0, 0, clockNtpServer(0), clockNtpServer(1), clockNtpServer(2));
-
-    const unsigned long start = millis();
-    while (millis() - start < CLOCK_WIFI_SNTP_WAIT_MS) {
-      const time_t now = time(nullptr);
-      if (clockIsPlausible((int64_t)now)) {
-        Serial.printf("[clock] Wi-Fi SNTP answered after %lu ms\n", (unsigned long)(millis() - start));
-        clockSetFromNetwork((uint32_t)now, ClockSource::NTP);
-        return true;
-      }
-      delay(200U);
-    }
-    Serial.printf("[clock] Wi-Fi SNTP round %u timed out\n", (unsigned)(round + 1));
+    clockSntpStarted = true;
   }
+
+  const unsigned long start = millis();
+  while (millis() - start < waitMs) {
+    if (clockAdoptBackgroundSync()) {
+      Serial.printf("[clock] Wi-Fi SNTP answered after %lu ms\n", (unsigned long)(millis() - start));
+      return true;
+    }
+    delay(200U);
+  }
+  Serial.printf("[clock] no Wi-Fi SNTP answer within %lu ms; SNTP keeps trying in the background\n", waitMs);
   return false;
+}
+
+static bool clockSyncFromNetwork() {
+  return clockSyncFromNetworkFor(clockSntpStarted ? CLOCK_WIFI_SNTP_RESYNC_WAIT_MS : CLOCK_WIFI_SNTP_BOOT_WAIT_MS);
 }
 
 #else  // GSM
@@ -251,8 +281,8 @@ static bool clockSyncFromNetwork() {
 
   for (size_t i = 0; i < CLOCK_NTP_SERVER_COUNT; i++) {
     // TimeZone 0 -> the modem clock is set to UTC.
-    const byte code = modem.NTPServerSync(CLOCK_NTP_SERVERS[i], 0);
-    Serial.printf("[clock] SIM800 NTP %s -> code %u\n", CLOCK_NTP_SERVERS[i], (unsigned)code);
+    const byte code = modem.NTPServerSync(clockNtpServer(i), 0);
+    Serial.printf("[clock] SIM800 NTP %s -> code %u\n", clockNtpServer(i), (unsigned)code);
     if (code == 1 && clockReadModemUtc(unixTime)) {
       clockSetFromNetwork(unixTime, ClockSource::NTP);
       return true;
@@ -276,6 +306,11 @@ static bool clockSyncFromNetwork() {
   }
 #endif
   return false;
+}
+
+// The SIM800 has no background sync; time is only fetched on request.
+static bool clockAdoptBackgroundSync() {
+  return clockSource == ClockSource::NTP;
 }
 
 #endif  // USE_WIFI
@@ -347,7 +382,7 @@ void clockEnsure() {
 // After a TLS/MQTT failure that happened once TCP was up: re-fetch the time
 // if we are not on NTP time, at most once per CLOCK_RESYNC_COOLDOWN_MS.
 bool clockResyncDue() {
-  if (clockSource == ClockSource::NTP) return false;
+  if (clockAdoptBackgroundSync()) return false;
   return !clockResyncAttempted || millis() - clockLastResyncAtMs >= CLOCK_RESYNC_COOLDOWN_MS;
 }
 
@@ -365,6 +400,7 @@ bool clockResync() {
 // Call from loop(): keeps the saved fallback time fresh (every 6 h) and
 // re-bases the uptime-derived fallback before millis() can wrap.
 void clockMaintain() {
+  clockAdoptBackgroundSync();
   if (millis() - clockLastSavedAtMs < CLOCK_SAVE_INTERVAL_MS) return;
   const uint32_t now = clockNowUnix();
   if (clockFallbackReady && clockSource != ClockSource::NTP && clockSource != ClockSource::MODEM_CLOCK) {
@@ -379,6 +415,7 @@ void clockMaintain() {
 // context, which SSLClient only initialises in its constructor, so it survives
 // stop()/reconnect; it is reapplied on every create/connect anyway.
 void applyVerificationTime(SSLClient& client) {
+  clockAdoptBackgroundSync();
   const uint32_t now = clockNowUnix();
   client.setVerificationTime(now / 86400UL + 719528UL, now % 86400UL);
 }
