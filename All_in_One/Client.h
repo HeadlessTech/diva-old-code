@@ -49,6 +49,10 @@ void pickBestClient() {
   Serial.println(gsmRssi);
 #endif
 
+  // Real time for certificate validation: after the transport is up (SIM800
+  // NTP needs the GPRS bearer), before initializeSSL() takes its heap.
+  clockEnsure();
+
   initializeSSL();
 }
 

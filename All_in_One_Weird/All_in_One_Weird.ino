@@ -308,6 +308,7 @@ void setup() {
 
 void loop() {
   monitorHealth();
+  clockMaintain();
 
   pickBestClientInLoop();
 

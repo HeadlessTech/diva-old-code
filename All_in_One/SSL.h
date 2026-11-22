@@ -6,6 +6,7 @@
 #include "AWS_Root_CA.h"
 #include "WifiClient.h"
 #include "GsmClient.h"
+#include "Clock.h"
 
 #ifdef USE_WIFI
 std::unique_ptr<SSLClient> wifiSSLClient = nullptr;
@@ -87,12 +88,19 @@ void initializeSSL() {
     wifiSSLClient.reset(new SSLClient(wifiClient, TAs, TAs_NUM, A5));
     wifiSSLClient->setMutualAuthParams(mTLS);
   }
+  // Without this, SSLClient validates the broker certificate against the
+  // compile date (see Clock.h).
+  applyVerificationTime(*wifiSSLClient);
 #else
   if (!gsmSSLClient) {
     gsmSSLClient.reset(new SSLClient(gsmClient, TAs, TAs_NUM, A5));
     gsmSSLClient->setMutualAuthParams(mTLS);
   }
+  // Without this, SSLClient validates the broker certificate against the
+  // compile date (see Clock.h).
+  applyVerificationTime(*gsmSSLClient);
 #endif
+  clockLogState("TLS verification time");
   delay(200U);  // Short delay for memory stabilization
 
   Serial.printf("Free heap after initializeSSL: %d\n", ESP.getFreeHeap());

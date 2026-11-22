@@ -123,12 +123,19 @@ void drainInbound(uint8_t passes = 3) {
   } 
 }
 
-bool sendCurrentStatus() {
-  StaticJsonDocument<48> doc;
-  doc["message"] = "online";
+// Build identifier sent with the "online" status so the server can tell which
+// firmware build each machine runs. The server ignores unknown fields.
+#ifndef FW_VERSION
+#define FW_VERSION "AIO_W " __DATE__ " " __TIME__
+#endif
 
-  char mqttBuffer[48];
-  serializeJson(doc, mqttBuffer);
+bool sendCurrentStatus() {
+  StaticJsonDocument<128> doc;
+  doc["message"] = "online";
+  doc["fw"] = FW_VERSION;
+
+  char mqttBuffer[96];
+  serializeJson(doc, mqttBuffer, sizeof mqttBuffer);
 
   Serial.println(mqttBuffer);
 
@@ -173,6 +180,7 @@ bool connectMqtt() {
   }
 
   mqtt.setClient(*SSL_CLIENT_TO_USE);
+  applyVerificationTime(*SSL_CLIENT_TO_USE);
 
   Serial.println("MQTT Connecting ....");
   unsigned long start = millis();
@@ -193,6 +201,18 @@ bool connectMqtt() {
       sendCurrentStatus();
       break;
     } else {
+      // A certificate rejection ("Certificate is expired or not yet valid.")
+      // closes the TLS engine with getWriteError() still SSL_OK; a TCP failure
+      // reports SSL_CLIENT_CONNECT_FAIL. If TCP got through and we are not on
+      // NTP time, fetch the time again instead of rebooting into the same
+      // rejection.
+      if (SSL_CLIENT_TO_USE->getWriteError() != SSLClient::SSL_CLIENT_CONNECT_FAIL && clockResyncDue()) {
+        SSL_CLIENT_TO_USE->stop();
+        if (clockResync()) {
+          applyVerificationTime(*SSL_CLIENT_TO_USE);
+          start = millis();  // give the retry the full timeout
+        }
+      }
       delay(500U);
       yield();
     }
