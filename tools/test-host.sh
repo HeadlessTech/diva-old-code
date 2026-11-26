@@ -12,7 +12,7 @@ status=0
 for test in tests/host/*_test.cpp; do
   name=$(basename "$test" .cpp)
   echo "### $name"
-  "$CXX" -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Werror \
+  "$CXX" -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable -Werror \
     -I tests/host/stubs -o "$OUT/$name" "$test"
   "$OUT/$name" || status=1
 done
