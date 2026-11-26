@@ -43,6 +43,11 @@
 #include "i_SomethingWentWrong.h"
 #include "i_TryAgain.h"
 
+#if IS_TWO_GROUP
+#include "i_PushBtnOrScanQR.h"
+#include "i_HoldRfid.h"
+#endif
+
 CompositeGraphics graphics(CompositeColorOutput::XRES, CompositeColorOutput::YRES);
 CompositeColorOutput composite(CompositeColorOutput::NTSC);
 
@@ -102,6 +107,11 @@ DIVA_IMAGE(noteAccepted_t, NoteAccepted);
 DIVA_IMAGE(somethingWentWrong_t, SomethingWentWrong);
 DIVA_IMAGE(tryAgain_t, TryAgain);
 
+#if IS_TWO_GROUP
+DIVA_IMAGE(pushBtnOrScanQR_t, PushBtnOrScanQR);  // idle: press a group button or scan the QR
+DIVA_IMAGE(holdRfid_t, HoldRFID);                // group chosen: tap the card
+#endif
+
 
 bool screenRowIsDrawn(int y) {
   return (y >= LOGO_Y && y < LOGO_Y + (int)HeadlessLogo::yres) ||
@@ -127,8 +137,11 @@ void showImage(Image<CompositeGraphics>& img) {
 }
 
 
+// The idle screen: what the customer can do on this machine.
 void showModuleImage() {
-  #if defined(HAS_RFID_MODULE) && defined(HAS_CASH_MODULE) && defined(HAS_BKASH_MODULE)
+  #if IS_TWO_GROUP
+    showImage(pushBtnOrScanQR_t);
+  #elif defined(HAS_RFID_MODULE) && defined(HAS_CASH_MODULE) && defined(HAS_BKASH_MODULE)
     showImage(allInOne_t);
   #elif defined(HAS_RFID_MODULE) && defined(HAS_CASH_MODULE)
     showImage(allInOne_t);

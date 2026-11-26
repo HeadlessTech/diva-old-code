@@ -140,7 +140,8 @@ enum GLOBAL_STATE : uint8_t {
   IDLE,
   DISPENSE,
   CONNECT,
-  SYNC
+  SYNC,
+  AWAITING_RFID,  // two-group machine: a group button was pressed, waiting for the card
 };
 
 static GLOBAL_STATE globalState = GLOBAL_STATE::EMPTY_STOCK;
@@ -183,4 +184,35 @@ bool setDispenseRequest(const DispenseRequest& newState) {
   xSemaphoreGive(dispenseReqMutex);
   return true;
 }
+
+#if IS_TWO_GROUP
+// ---------------------------------------------------------------------------
+// Two-group 160 machine (MACHINE_TYPE TYPE_TWO_GROUP_160)
+// ---------------------------------------------------------------------------
+// The customer presses a group button, then taps the card. The group names
+// are the machine's size IDs in VMS: columns 1-2 must be BELT and columns
+// 3-6 PANTY in the machine's stock there, matching the wiring (Dispense.h).
+#define SIZE_BELT    "BELT"   // top button: columns 1-2 (two motors each)
+#define SIZE_PANTY   "PANTY"  // bottom button: columns 3-6 (one motor each)
+#define GROUP_RFID_TIMEOUT_MS 15000UL  // time to tap the card after the button
+
+static const char* selectedGroup = nullptr;  // nullptr = none, SIZE_BELT or SIZE_PANTY
+static unsigned long groupSelectedAt = 0;    // millis() when the group was chosen
+
+// Per-group stock, from the sync reply's "stock" object (keyed by size ID).
+struct SizeStock {
+  uint16_t belt  = 0;
+  uint16_t panty = 0;
+};
+
+static SizeStock sizeStock = {};
+
+// Returns the stock count for the given sizeId, or 0 if unknown
+inline uint16_t getStockForSize(const char* sizeId) {
+  if (sizeId == nullptr) return 0;
+  if (strcmp(sizeId, SIZE_BELT) == 0)  return sizeStock.belt;
+  if (strcmp(sizeId, SIZE_PANTY) == 0) return sizeStock.panty;
+  return 0;
+}
+#endif
 

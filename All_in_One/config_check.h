@@ -118,8 +118,3 @@ static_assert(sizeof(WIFI_SSID) > 1, "config.h: WIFI_SSID is empty, but NETWORK 
 #define HAS_CASH_MODULE
 #endif
 #define IS_TWO_GROUP (MACHINE_TYPE == TYPE_TWO_GROUP_160)
-
-// Until the two-group machine is merged into this firmware (next change).
-#if IS_TWO_GROUP
-#error "TYPE_TWO_GROUP_160 is not supported by this build yet"
-#endif
