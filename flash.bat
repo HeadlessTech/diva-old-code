@@ -43,7 +43,18 @@ if errorlevel 1 (
 )
 
 echo.
-echo Building from All_in_One\config.h and flashing to %PORT% ...
+echo Settings in All_in_One\config.h:
+echo.
+findstr /B /C:"#define" All_in_One\config.h
+echo.
+choice /C YN /M "Flash this machine with these settings"
+if errorlevel 2 (
+  echo Cancelled. Edit All_in_One\config.h and run flash.bat again.
+  exit /b 1
+)
+
+echo.
+echo Building and flashing to %PORT% ...
 arduino-cli compile --fqbn %FQBN% --upload --port %PORT% All_in_One
 if errorlevel 1 (
   echo.

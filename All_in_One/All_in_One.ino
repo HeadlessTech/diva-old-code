@@ -1,15 +1,7 @@
-// comment this line on production 
-// #define IS_DEVELOPMENT
-
-// comment this line when using GSM
-// #define USE_WIFI
-
-#define MACHINE_ID "BAIO20"
-#define MACHINE_SIZE 20
-
-#define HAS_BKASH_MODULE
-#define HAS_RFID_MODULE
-#define HAS_CASH_MODULE
+// Diva vending machine firmware, for every machine type.
+// Per-machine settings are in config.h (the only file to edit per machine).
+#include "config.h"
+#include "config_check.h"
 
 #include "src/ArduinoJson/ArduinoJson.h"
 #include "src/MultiButton/PinButton.h"
@@ -116,47 +108,20 @@ void setup() {
 
   delay(500);
 
-  // ---- Build config (one-shot boot log) ----
+  // ---- Configuration from config.h (one-shot boot log) ----
   Serial.println();
   Serial.println("========================================");
   Serial.printf("Machine ID:    %s\n", MACHINE_ID);
+  Serial.printf("Machine type:  %s\n", IS_TWO_GROUP ? "TWO_GROUP_160" : "STANDARD");
   Serial.printf("Machine size:  %d\n", MACHINE_SIZE);
-  Serial.printf("Build mode:    %s\n",
-#ifdef IS_DEVELOPMENT
-    "DEVELOPMENT"
-#else
-    "PRODUCTION"
-#endif
-  );
-  Serial.printf("Network:      %s\n",
 #ifdef USE_WIFI
-    "WIFI"
+  Serial.printf("Network:       WIFI (%s)\n", WIFI_SSID);
 #else
-    "GSM"
+  Serial.println("Network:       GSM");
 #endif
-  );
-  Serial.println("Modules:");
-  Serial.printf("  RFID:  %s\n",
-#ifdef HAS_RFID_MODULE
-    "ENABLED"
-#else
-    "disabled"
-#endif
-  );
-  Serial.printf("  BKASH: %s\n",
-#ifdef HAS_BKASH_MODULE
-    "ENABLED"
-#else
-    "disabled"
-#endif
-  );
-  Serial.printf("  CASH:  %s\n",
-#ifdef HAS_CASH_MODULE
-    "ENABLED"
-#else
-    "disabled"
-#endif
-  );
+  Serial.printf("Server:        %s\n", SERVER == SERVER_STAGING ? "STAGING (/dev topics)" : "PRODUCTION");
+  Serial.printf("Modules:       RFID %s, BKASH %s, CASH %s\n", HAS_RFID ? "yes" : "no",
+                HAS_BKASH ? "yes" : "no", HAS_CASH ? "yes" : "no");
 
   delay(200U);
   Serial.printf("CPU Freq: %d MHz\n", getCpuFrequencyMhz());
