@@ -464,12 +464,20 @@ void loopTwoGroup() {
     } else if (currState == GLOBAL_STATE::IDLE) {
       getDispenseRequest(currentDispReq);
       if (currentDispReq.isExpectingResponse) {
-        // bKash server-initiated dispense - just wait
+        // A card request is still waiting for the server after the 15 s
+        // group window ended. As on standard machines: give up after 25 s
+        // and show "try again" instead of rebooting. A late reply still
+        // dispenses (the broker keeps it; the saved dispense numbers prevent
+        // a double dispense).
         mqtt.loop();
-        if (millis() - currentDispReq.requestedAt > 15000U) {
+        if (millis() - currentDispReq.requestedAt > 25000U) {
+          Serial.println("Dispense response timeout - giving up gracefully (no reboot)");
           currentDispReq.isExpectingResponse = false;
+          currentDispReq.requestedAt = 0;
           setDispenseRequest(currentDispReq);
-          recoverConnectionOrRestart("dispense response timeout", RecoveryImageMode::DISPENSE_FAIL);
+          showImage(tryAgain_t);
+          delay(2000U);
+          setGlobalState(GLOBAL_STATE::IDLE);
         }
       }
     }

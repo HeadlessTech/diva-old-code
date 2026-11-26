@@ -198,6 +198,17 @@ void handleDispenseResponse(JsonDocument mqttDoc) {
       showImage(refill_t);
       delay(3000U);
       break;
+    case 405:
+      // There is no "not enough points" image; "limit crossed" is the
+      // closest message (reusing it costs no memory).
+      Serial.println("Not enough points");
+#if defined(HAS_RFID_MODULE)
+      showImage(rfidLimitCrossed_t);
+#else
+      showImage(somethingWentWrong_t);
+#endif
+      delay(3000U);
+      break;
     default:
       Serial.println("invalid status code");
       showImage(somethingWentWrong_t);
