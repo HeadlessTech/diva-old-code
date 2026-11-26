@@ -1,7 +1,7 @@
 // SSL.h
 #pragma once
 
-#include <SSLClient.h>
+#include "src/SSLClient/SSLClient.h"
 
 #include "AWS_Root_CA.h"
 #include "WifiClient.h"

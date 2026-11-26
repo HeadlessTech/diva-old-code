@@ -11,11 +11,11 @@
 #define HAS_RFID_MODULE
 #define HAS_CASH_MODULE
 
-#include <ArduinoJson.h>
-#include <PinButton.h>
+#include "src/ArduinoJson/ArduinoJson.h"
+#include "src/MultiButton/PinButton.h"
 
 #if defined(HAS_RFID_MODULE)
-#include <rdm6300.h>
+#include "src/Rdm6300/rdm6300.h"
 Rdm6300 rdm6300;
 #endif
 
