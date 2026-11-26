@@ -96,8 +96,10 @@ log. No libraries need installing.
 
 ## Testing (software team)
 
-- `tools/build-all.sh` builds every machine type and checks that `config.h`
-  mistakes are rejected. Run it before every commit.
+- `tools/test-host.sh` runs the firmware logic tests on the computer, and
+  `tools/build-all.sh` builds every machine type and checks that `config.h`
+  mistakes are rejected. Run both before every commit; GitHub Actions runs
+  them on every PR.
 - `tools/build.sh -p <port> -m` builds, flashes and shows the log (macOS/Linux).
 - To test against the staging server, set `SERVER SERVER_STAGING`: the
   machine uses the `/dev` topics and appears on `vms-new.headless.ltd`

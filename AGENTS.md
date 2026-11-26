@@ -53,10 +53,16 @@ src/                  the libraries, copied in by tools/vendor-libraries.sh (don
 ## Building and testing
 
 ```bash
+tools/test-host.sh            # firmware logic on the computer (dispense-number history, state)
 tools/build-all.sh            # before every commit: all machine types + 13 config.h mistakes
 tools/build-all.sh --quick    # one build per machine type + the checks
 tools/build.sh -p /dev/cu.usbserial-XXXX -m   # flash a test board and watch the log
 ```
+
+GitHub Actions (`.github/workflows/firmware.yml`) runs the host tests and
+`tools/build-all.sh` on every PR and push to `main`. Host tests live in
+`tests/host/` with small stand-ins for the ESP32 APIs in `tests/host/stubs/`;
+add one there when you change logic that can run without the board.
 
 - ESP32 board package **2.0.17** exactly (`config_check.h` enforces it);
   board `esp32:esp32:esp32` with default options.
@@ -64,10 +70,11 @@ tools/build.sh -p /dev/cu.usbserial-XXXX -m   # flash a test board and watch the
   PubSubClient 2.8, Rdm6300 2.0.0, SSLClient 1.6.11, TinyGSM 0.12.0). Includes
   use `"src/<Lib>/..."`. To upgrade, run `tools/vendor-libraries.sh`, which
   also re-applies our one patch (below) and fails if it no longer fits.
-- There are no automated tests on the host. Verification is: every
-  configuration builds, then a board test with serial output against the
-  staging server (`SERVER_STAGING`, `vms-new.headless.ltd`, `/dev` topics).
-  Say in your summary what was built and what still needs the board.
+- Verification: host tests pass, every configuration builds, then a board
+  test with serial output against the staging server (`SERVER_STAGING`,
+  `vms-new.headless.ltd`, `/dev` topics). The VMS repo's integration tests
+  play a machine with exactly this firmware's messages (its contract tests).
+  Say in your summary what was built and tested and what still needs the board.
 
 ## Configuration (config.h -> config_check.h)
 
