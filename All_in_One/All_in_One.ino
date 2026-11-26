@@ -111,6 +111,7 @@ void setup() {
   // ---- Configuration from config.h (one-shot boot log) ----
   Serial.println();
   Serial.println("========================================");
+  Serial.printf("Firmware:      %s\n", FW_VERSION);
   Serial.printf("Machine ID:    %s\n", MACHINE_ID);
   Serial.printf("Machine type:  %s\n", IS_TWO_GROUP ? "TWO_GROUP_160" : "STANDARD");
   Serial.printf("Machine size:  %d\n", MACHINE_SIZE);
