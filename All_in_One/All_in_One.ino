@@ -151,8 +151,9 @@ void setup() {
 
   delay(100U);
 
-  composite.init();
-  graphics.init();
+  Serial.printf("Free heap before display: %u\n", (unsigned)ESP.getFreeHeap());
+  displayInit();
+  Serial.printf("Free heap after display:  %u\n", (unsigned)ESP.getFreeHeap());
   showImage(welcome_t);
   delay(2000U);
 

@@ -46,54 +46,84 @@
 CompositeGraphics graphics(CompositeColorOutput::XRES, CompositeColorOutput::YRES);
 CompositeColorOutput composite(CompositeColorOutput::NTSC);
 
+// Screen layout on the 336x240 frame. Only these two areas are ever drawn;
+// the rest of the screen stays black and has no memory of its own (see
+// CompositeGraphics::init).
+constexpr int LOGO_X = 60, LOGO_Y = 40;     // Headless logo, drawn once at boot
+constexpr int IMAGE_X = 90, IMAGE_Y = 100;  // the current message image
+constexpr unsigned int IMAGE_WIDTH = 168, IMAGE_HEIGHT = 124;
+
+// Declares a message image and checks its size at build time: every image
+// is drawn over the previous one, so all must be exactly IMAGE_WIDTH x
+// IMAGE_HEIGHT.
+#define DIVA_IMAGE(var, ns)                                                   \
+  static_assert(ns::xres == IMAGE_WIDTH && ns::yres == IMAGE_HEIGHT,          \
+                #ns " must be 168x124 pixels like every other screen image"); \
+  Image<CompositeGraphics> var(ns::xres, ns::yres, ns::pixels)
+
 Image<CompositeGraphics> logo_image(HeadlessLogo::xres, HeadlessLogo::yres, HeadlessLogo::pixels);
 
-void showImage(Image<CompositeGraphics> text);
+void showImage(Image<CompositeGraphics>& img);
 
 #if defined(HAS_BKASH_MODULE)
-Image<CompositeGraphics> bkashComplete_t(BkashComplete::xres, BkashComplete::yres, BkashComplete::pixels);
-Image<CompositeGraphics> bkashFailed_t(BkashFailed::xres, BkashFailed::yres, BkashFailed::pixels);
-Image<CompositeGraphics> onlyBkash_t(OnlyBkash::xres, OnlyBkash::yres, OnlyBkash::pixels);
+DIVA_IMAGE(bkashComplete_t, BkashComplete);
+DIVA_IMAGE(bkashFailed_t, BkashFailed);
+DIVA_IMAGE(onlyBkash_t, OnlyBkash);
 #endif
 
 #if defined(HAS_RFID_MODULE)
-Image<CompositeGraphics> onlyRfid_t(OnlyRfid::xres, OnlyRfid::yres, OnlyRfid::pixels);
+DIVA_IMAGE(onlyRfid_t, OnlyRfid);
 #endif
 
 #if defined(HAS_RFID_MODULE) && defined(HAS_BKASH_MODULE)
-Image<CompositeGraphics> rfidAndBkash_t(RfidAndBkash::xres, RfidAndBkash::yres, RfidAndBkash::pixels);
+DIVA_IMAGE(rfidAndBkash_t, RfidAndBkash);
 #endif
 
-Image<CompositeGraphics> collectProduct_t(CollectProduct::xres, CollectProduct::yres, CollectProduct::pixels);
-Image<CompositeGraphics> connecting_t(Connecting::xres, Connecting::yres, Connecting::pixels);
-Image<CompositeGraphics> dispensing_t(Dispensing::xres, Dispensing::yres, Dispensing::pixels);
-Image<CompositeGraphics> allInOne_t(AllInOne::xres, AllInOne::yres, AllInOne::pixels);
-Image<CompositeGraphics> refill_t(Refill::xres, Refill::yres, Refill::pixels);
-Image<CompositeGraphics> welcome_t(Welcome::xres, Welcome::yres, Welcome::pixels);
+DIVA_IMAGE(collectProduct_t, CollectProduct);
+DIVA_IMAGE(connecting_t, Connecting);
+DIVA_IMAGE(dispensing_t, Dispensing);
+DIVA_IMAGE(allInOne_t, AllInOne);
+DIVA_IMAGE(refill_t, Refill);
+DIVA_IMAGE(welcome_t, Welcome);
 
 #if defined(HAS_RFID_MODULE)
-Image<CompositeGraphics> rfidProcessing_t(RfidProcessing::xres, RfidProcessing::yres, RfidProcessing::pixels);
-Image<CompositeGraphics> rfidBlocked_t(RfidBlocked::xres, RfidBlocked::yres, RfidBlocked::pixels);
-Image<CompositeGraphics> rfidLimitCrossed_t(RfidLimitCrossed::xres, RfidLimitCrossed::yres, RfidLimitCrossed::pixels);
+DIVA_IMAGE(rfidProcessing_t, RfidProcessing);
+DIVA_IMAGE(rfidBlocked_t, RfidBlocked);
+DIVA_IMAGE(rfidLimitCrossed_t, RfidLimitCrossed);
 #endif
-Image<CompositeGraphics> unauthorizedRequest_t(UnauthorizedRequest::xres, UnauthorizedRequest::yres, UnauthorizedRequest::pixels);
+DIVA_IMAGE(unauthorizedRequest_t, UnauthorizedRequest);
 
 #if defined(HAS_CASH_MODULE)
-Image<CompositeGraphics> insertTenTaka_t(InsertTenTaka::xres, InsertTenTaka::yres, InsertTenTaka::pixels);
-Image<CompositeGraphics> noteProcessing_t(NoteProcessing::xres, NoteProcessing::yres, NoteProcessing::pixels);
-Image<CompositeGraphics> noteAccepted_t(NoteAccepted::xres, NoteAccepted::yres, NoteAccepted::pixels);
+DIVA_IMAGE(insertTenTaka_t, InsertTenTaka);
+DIVA_IMAGE(noteProcessing_t, NoteProcessing);
+DIVA_IMAGE(noteAccepted_t, NoteAccepted);
 #endif
 
-Image<CompositeGraphics> somethingWentWrong_t(SomethingWentWrong::xres, SomethingWentWrong::yres, SomethingWentWrong::pixels);
-Image<CompositeGraphics> tryAgain_t(TryAgain::xres, TryAgain::yres, TryAgain::pixels);
+DIVA_IMAGE(somethingWentWrong_t, SomethingWentWrong);
+DIVA_IMAGE(tryAgain_t, TryAgain);
 
 
-void showImage(Image<CompositeGraphics> img) {
-  graphics.begin(0); // clear screen black
-  logo_image.draw(graphics, 60, 40);
-  img.draw(graphics, 90, 100);
-  graphics.end();
+bool screenRowIsDrawn(int y) {
+  return (y >= LOGO_Y && y < LOGO_Y + (int)HeadlessLogo::yres) ||
+         (y >= IMAGE_Y && y < IMAGE_Y + (int)IMAGE_HEIGHT);
+}
+
+// Call once in setup(), before the first showImage().
+void displayInit() {
+  composite.init();  // starts the video signal; shows nothing until frame is set
+  graphics.init(screenRowIsDrawn);
+  logo_image.draw(graphics, LOGO_X, LOGO_Y);  // never changes
   composite.sendFrameHalfResolution(&graphics.frame);
+}
+
+static const unsigned char* shownImagePixels = nullptr;
+
+// Shows img in the message area. It is drawn only when the picture changes
+// (about 1 ms), so calling this on every loop pass costs nothing.
+void showImage(Image<CompositeGraphics>& img) {
+  if (img.pixels == shownImagePixels) return;
+  img.draw(graphics, IMAGE_X, IMAGE_Y);
+  shownImagePixels = img.pixels;
 }
 
 

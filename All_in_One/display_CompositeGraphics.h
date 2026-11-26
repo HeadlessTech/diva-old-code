@@ -26,18 +26,46 @@ class CompositeGraphics
       backColor = -1;
     }
 
-    void init()
+    // Diva: one framebuffer, drawn in place, holding only the rows that are
+    // ever drawn (rowIsDrawn(y) true). Every other row shows one shared
+    // black row; drawing into such a row goes to a scratch row that is never
+    // shown, so it can't change the screen. The video interrupt reads each
+    // line through frame[y], so rows can share memory.
+    // Before: a front and a back buffer of 336x240, allocated as 480 blocks,
+    // about 165 KB of heap. Now, for the logo + one image: about 58 KB.
+    // Drawing an image takes about 1 ms, so drawing in place doesn't flicker.
+    void init(bool (*rowIsDrawn)(int y))
     {
-      frame = (char**)malloc(yres * sizeof(char*));
-      backbuffer = (char**)malloc(yres * sizeof(char*));
-      //not enough memory for z-buffer implementation
-      //zbuffer = (char**)malloc(yres * sizeof(char*));
+      int drawnRows = 0;
+      for (int y = 0; y < yres; y++)
+        if (rowIsDrawn(y)) drawnRows++;
+
+      frame = (char**)malloc(yres * sizeof(char*));       // what is shown
+      backbuffer = (char**)malloc(yres * sizeof(char*));  // what is drawn into
+      // the drawn rows, then the shared black row, then the scratch row;
+      // zeroed = black. One block, so it can't fragment the heap.
+      char* rows = (char*)calloc((size_t)(drawnRows + 2) * xres, 1);
+      if (!frame || !backbuffer || !rows)
+      {
+        printf("display: out of memory for the framebuffer, restarting\n");
+        esp_restart();
+      }
+      char* black = rows + (size_t)drawnRows * xres;
+      char* scratch = black + xres;
       for (int y = 0; y < yres; y++)
       {
-        frame[y] = (char*)malloc(xres);
-        backbuffer[y] = (char*)malloc(xres);
-        //zbuffer[y] = (char*)malloc(xres);
+        if (rowIsDrawn(y))
+        {
+          frame[y] = backbuffer[y] = rows;
+          rows += xres;
+        }
+        else
+        {
+          frame[y] = black;
+          backbuffer[y] = scratch;
+        }
       }
+      zbuffer = nullptr;
     }
     inline void begin(int clear = -1)
     {
@@ -59,10 +87,8 @@ class CompositeGraphics
         _BB_PIXEL(x, y) = color + _BB_PIXEL(x, y);
     }
 
+    // Single buffer (see init): what is drawn is already shown.
     inline void end()
     {
-      char **b = backbuffer;
-      backbuffer = frame;
-      frame = b;
     }
 };
