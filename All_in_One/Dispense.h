@@ -76,8 +76,9 @@ void dispenseProcess(int col) {
       runMotorSpring(motorPins[4], motorLimitSwitches[2]);
       break;
     case 6:
-      // Pin 33 doubles as a crystal oscillator input; some timer operations
-      // force it back to INPUT mode, so we re-assert OUTPUT before driving it.
+      // GPIO 33 was switched to an analog input before every TLS connection
+      // (SSLClient read it as A5 for randomness; fixed, see SSL.h). Setting
+      // OUTPUT again before driving it is kept as a harmless safeguard.
       pinMode(motorPins[5], OUTPUT);
       runMotorSpring(motorPins[5], motorLimitSwitches[2]);
       break;

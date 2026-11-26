@@ -19,6 +19,7 @@
  */
 
 #include "SSLClient.h"
+#include <esp_random.h>  // Diva patch, see below
 
 /* see SSLClient.h */
 SSLClient::SSLClient(   Client& client, 
@@ -336,8 +337,10 @@ int SSLClient::m_start_ssl(const char* host, SSLSession* ssl_ses) {
     // we want 128 bits to be safe, as recommended by the bearssl docs
     uint8_t rng_seeds[16];
     // take the bottom 8 bits of the analog read
-    for (uint8_t i = 0; i < sizeof rng_seeds; i++) 
-        rng_seeds[i] = static_cast<uint8_t>(analogRead(m_analog_pin));
+    // Diva patch (tools/vendor-libraries.sh): use the ESP32 hardware random
+    // number generator instead of analogRead(m_analog_pin), which reconfigured
+    // a motor pin and gave next to no entropy.
+    esp_fill_random(rng_seeds, sizeof rng_seeds);
     br_ssl_engine_inject_entropy(&m_sslctx.eng, rng_seeds, sizeof rng_seeds);
     // inject session parameters for faster reconnection, if we have any
     if(ssl_ses != nullptr) {

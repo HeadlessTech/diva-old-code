@@ -76,5 +76,29 @@ for name in names:
     total += changed
 PY
 
+# Patch: seed SSLClient's TLS random generator from the ESP32 hardware RNG.
+# SSLClient seeds BearSSL (whose only seed it is) with 16 analogRead()s of the
+# pin given to its constructor. The firmware passed A5 = GPIO 33, which is the
+# column-6 motor pin: every TLS connection switched that motor pin to an
+# analog input, and the "random" bytes were readings of a pin held LOW.
+python3 - "$DEST/SSLClient/SSLClient.cpp" <<'PY'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+old = re.compile(r"[ \t]*for \(uint8_t i = 0; i < sizeof rng_seeds; i\+\+\)\s*\n"
+                 r"\s*rng_seeds\[i\] = static_cast<uint8_t>\(analogRead\(m_analog_pin\)\);")
+new = ("    // Diva patch (tools/vendor-libraries.sh): use the ESP32 hardware random\n"
+       "    // number generator instead of analogRead(m_analog_pin), which reconfigured\n"
+       "    // a motor pin and gave next to no entropy.\n"
+       "    esp_fill_random(rng_seeds, sizeof rng_seeds);")
+s, n = old.subn(lambda m: new, s)
+assert n == 1, "SSLClient.cpp changed upstream: review the RNG patch"
+inc = '#include "SSLClient.h"\n'
+assert s.count(inc) == 1
+s = s.replace(inc, inc + "#include <esp_random.h>  // Diva patch, see below\n")
+open(p, "w").write(s)
+print("  SSLClient     patched: TLS seeded from the ESP32 hardware RNG")
+PY
+
 echo "Copied into $DEST:"
 sed 1d "$DEST/VERSIONS.txt"
