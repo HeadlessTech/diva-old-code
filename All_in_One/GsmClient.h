@@ -2,7 +2,7 @@
 #pragma once
 
 #define TINY_GSM_MODEM_SIM800
-#include <TinyGsmClient.h>
+#include "src/TinyGSM/TinyGsmClient.h"
 
 #define GSM_APN "INTERNET"
 #define GPRS_USER ""

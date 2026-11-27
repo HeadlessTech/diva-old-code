@@ -3,8 +3,7 @@
 
 #include <WiFi.h>
 
-#define WIFI_SSID "Diva"
-#define WIFI_PASS "headtechless"
+// WIFI_SSID and WIFI_PASSWORD come from config.h.
 
 WiFiClient wifiClient;
 
@@ -19,14 +18,12 @@ bool tryWifiConnect() {
 
   Serial.print("SSID: ");
   Serial.println(WIFI_SSID);
-  Serial.print("PASS: ");
-  Serial.println(WIFI_PASS);
 
   WiFi.disconnect(true);
   delay(100);
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 10000U) {

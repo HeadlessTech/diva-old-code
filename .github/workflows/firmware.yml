@@ -1,0 +1,44 @@
+# Firmware checks on every PR and push to main:
+#  - ShellCheck on the tools/ scripts
+#  - host tests (tests/host): firmware logic run on the computer
+#  - tools/build-all.sh: every machine type builds, config.h mistakes are rejected
+# Testing on a real board (serial log against the staging server) stays manual.
+name: Firmware
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    steps:
+      - uses: actions/checkout@v4
+
+      # ShellCheck is preinstalled on the Ubuntu runners
+      - name: Shell scripts (ShellCheck)
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck
+
+      - name: Host tests
+        run: tools/test-host.sh
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Cache the ESP32 board package
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino15-esp32-2.0.17-v1
+
+      - name: Install ESP32 board package 2.0.17
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@2.0.17
+
+      - name: Build every machine type, check config.h mistakes are rejected
+        run: tools/build-all.sh

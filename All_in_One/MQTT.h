@@ -1,15 +1,16 @@
 // MQTT.h
 #pragma once
 
-#include <PubSubClient.h> 
+#include "src/PubSubClient/PubSubClient.h"
 
 #include "Global.h"
 #include "SSL.h"
 #include "Dispense.h"
 #include "display.h"
 
-#define MQTT_BROKER "a35i41v9e1l1gt-ats.iot.ap-south-1.amazonaws.com"
-#define MQTT_PORT 8883  // ports usually this while using SSL
+#include "broker.h"   // broker address and the machines' login
+#include "version.h"
+
 #define MQTT_SUB_QOS 1
 #define MQTT_PACKET_SIZE 512
 
@@ -123,12 +124,24 @@ void drainInbound(uint8_t passes = 3) {
   } 
 }
 
-bool sendCurrentStatus() {
-  StaticJsonDocument<48> doc;
-  doc["message"] = "online";
+// The status JSON is built with snprintf into a fixed stack buffer. Enforce
+// at compile time that it always fits and is valid JSON: a truncated or
+// unescaped payload would fail JSON.parse on the server and the machine
+// would never show as online.
+#define STATUS_BUFFER_SIZE 64
+constexpr bool fwIsJsonSafe(const char* s) {
+  return *s == '\0' ? true
+       : (*s != '"' && *s != '\\' && (unsigned char)*s >= 0x20 && fwIsJsonSafe(s + 1));
+}
+static_assert(sizeof("{\"message\":\"online\",\"fw\":\"\"}") - 1 + sizeof(FW_VERSION) - 1 < STATUS_BUFFER_SIZE,
+              "FW_VERSION is too long for the status buffer");
+static_assert(fwIsJsonSafe(FW_VERSION), "FW_VERSION must not contain quotes, backslashes or control characters");
 
-  char mqttBuffer[48];
-  serializeJson(doc, mqttBuffer);
+bool sendCurrentStatus() {
+  // e.g. {"message":"online","fw":"2.0.0 STD Nov 27 2026 10:15:00"}  (58 chars)
+  // The server ignores fields it doesn't know and logs the version.
+  char mqttBuffer[STATUS_BUFFER_SIZE];
+  snprintf(mqttBuffer, sizeof mqttBuffer, "{\"message\":\"online\",\"fw\":\"%s\"}", FW_VERSION);
 
   Serial.println(mqttBuffer);
 
@@ -182,16 +195,21 @@ bool connectMqtt() {
     }
 
     static const char* lwtPayload = "{\"message\":\"offline\"}";
-    // cleanSession=false -> AWS IoT broker keeps the session for up to 1 hour
+    // cleanSession=false -> the broker keeps the session for up to 1 hour
     // across disconnects and redelivers queued QoS 1 msgs on reconnect. Without
     // this, any dispense msg the server publishes while we are reconnecting is
     // silently dropped at the broker - which is exactly the "bKash payment went
     // through but nothing dispensed" pattern we were seeing.
-    if (mqtt.connect(MACHINE_ID, nullptr, nullptr, lwtTOPIC, MQTT_LWT_QOS, MQTT_LWT_RETAIN, lwtPayload, false)) {
+    // Client ID = machine ID: the broker only allows a machine its own topics.
+    if (mqtt.connect(MACHINE_ID, MQTT_DEVICE_USERNAME, MQTT_DEVICE_PASSWORD, lwtTOPIC, MQTT_LWT_QOS,
+                     MQTT_LWT_RETAIN, lwtPayload, false)) {
       Serial.println("CONNECTION ESTABLISHED WITH LWT");
       sendCurrentStatus();
       break;
     } else {
+      // PubSubClient state: -4..-1 network/timeout, 2 client ID rejected,
+      // 4 wrong username or password, 5 not authorized (see broker.h).
+      Serial.printf("MQTT connect failed, state %d\n", mqtt.state());
       delay(500U);
       yield();
     }

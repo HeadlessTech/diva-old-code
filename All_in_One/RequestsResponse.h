@@ -61,17 +61,21 @@ bool sendSyncRequest(bool isAcknowledgement) {
   return true;
 }
 
-bool sendDispenseRequest(const char* rfid) {
+// rfid: the card number, or nullptr for cash. sizeId: the group on a
+// two-group machine (SIZE_BELT / SIZE_PANTY), otherwise nullptr.
+// e.g. {"rfid":"4294967295","info":"dispense","size":"PANTY"} (56 chars)
+bool sendDispenseRequest(const char* rfid, const char* sizeId = nullptr) {
   // Run the MQTT loop briefly instead of blocking — keeps the SSL connection
   // alive and avoids the 1 s dead-window that triggered reconnects.
   mqtt.loop();
 
-  StaticJsonDocument<48> mqttDocToSend;
+  StaticJsonDocument<96> mqttDocToSend;
 
   if (rfid != nullptr) mqttDocToSend["rfid"] = rfid;
   mqttDocToSend["info"] = "dispense";
+  if (sizeId != nullptr) mqttDocToSend["size"] = sizeId;
 
-  char mqtt_buffer[48];
+  char mqtt_buffer[96];
 
   serializeJson(mqttDocToSend, mqtt_buffer);
 
@@ -194,6 +198,17 @@ void handleDispenseResponse(JsonDocument mqttDoc) {
       showImage(refill_t);
       delay(3000U);
       break;
+    case 405:
+      // There is no "not enough points" image; "limit crossed" is the
+      // closest message (reusing it costs no memory).
+      Serial.println("Not enough points");
+#if defined(HAS_RFID_MODULE)
+      showImage(rfidLimitCrossed_t);
+#else
+      showImage(somethingWentWrong_t);
+#endif
+      delay(3000U);
+      break;
     default:
       Serial.println("invalid status code");
       showImage(somethingWentWrong_t);
@@ -232,6 +247,17 @@ void handleSyncResponse(const JsonDocument& mqttDoc) {
 
         int count = mqttDoc["count"].as<int>();
         globalData.hasStock = count >= 1;
+
+#if IS_TWO_GROUP
+        // Per-group stock: the server sends "stock" (by size ID) for machines
+        // with more than one size.
+        if (mqttDoc.containsKey("stock")) {
+          JsonObjectConst stockObj = mqttDoc["stock"].as<JsonObjectConst>();
+          sizeStock.belt  = stockObj[SIZE_BELT]  | (uint16_t)0;
+          sizeStock.panty = stockObj[SIZE_PANTY] | (uint16_t)0;
+          Serial.printf("Size stock - BELT: %u, PANTY: %u\n", sizeStock.belt, sizeStock.panty);
+        }
+#endif
 
         if (count <= 0) {
           setGlobalState(GLOBAL_STATE::EMPTY_STOCK);

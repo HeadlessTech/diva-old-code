@@ -1,3 +1,8 @@
+// DEPRECATED - do not flash this firmware. See DEPRECATED.md in this folder.
+// The two-group 160 machine now runs All_in_One with
+// MACHINE_TYPE TYPE_TWO_GROUP_160 in All_in_One/config.h.
+#error "All_in_One_Weird is deprecated: use All_in_One with MACHINE_TYPE TYPE_TWO_GROUP_160 in config.h"
+
 // comment this line on production 
 // #define IS_DEVELOPMENT
 
