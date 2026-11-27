@@ -18,9 +18,9 @@ cd "$(dirname "$0")/.."
 
 LIBS="${1:-$HOME/Documents/Arduino/libraries}"
 DEST=All_in_One/src
-NAMES="ArduinoJson MultiButton PubSubClient Rdm6300 SSLClient TinyGSM"
+NAMES=(ArduinoJson MultiButton PubSubClient Rdm6300 SSLClient TinyGSM)
 
-for name in $NAMES; do
+for name in "${NAMES[@]}"; do
   [ -f "$LIBS/$name/library.properties" ] || { echo "missing library: $LIBS/$name" >&2; exit 1; }
 done
 
@@ -28,18 +28,19 @@ rm -rf "${DEST:?}"
 mkdir -p "$DEST"
 echo "# Libraries copied by tools/vendor-libraries.sh. Do not edit by hand." > "$DEST/VERSIONS.txt"
 
-for name in $NAMES; do
+for name in "${NAMES[@]}"; do
   src="$LIBS/$name"
   version=$(grep -m1 '^version=' "$src/library.properties" | cut -d= -f2)
   url=$(grep -m1 '^url=' "$src/library.properties" | cut -d= -f2)
   mkdir -p "$DEST/$name"
   cp -R "$src/src/." "$DEST/$name/"
-  cp "$src/$(ls "$src" | grep -iE '^licen[cs]e' | head -1)" "$DEST/$name/"
+  license=$(find "$src" -maxdepth 1 -type f -iname 'licen[cs]e*' | sort | head -1)
+  cp "$license" "$DEST/$name/"
   rm -f "$DEST/$name/CMakeLists.txt"
   echo "$name $version $url" >> "$DEST/VERSIONS.txt"
 done
 
-python3 - "$DEST" $NAMES <<'PY'
+python3 - "$DEST" "${NAMES[@]}" <<'PY'
 import os, re, sys
 dest, names = sys.argv[1], sys.argv[2:]
 inc = re.compile(r'^(\s*#\s*include\s*)([<"])([^>"]+)[>"](.*)$')

@@ -10,7 +10,7 @@
 # (ignored by git) so the next run only rebuilds what changed. The real
 # config.h is never touched.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 FQBN=esp32:esp32:esp32
 QUICK=0; [ "${1:-}" = "--quick" ] && QUICK=1
@@ -50,8 +50,7 @@ bad() { echo "  FAIL  $*"; fail=$((fail + 1)); }
 build() {  # name, config text
   local name=$1 dir out
   dir=$(prepare "$name" "$2")
-  out=$(arduino-cli compile --fqbn "$FQBN" --build-path "$WORK/$name/build" "$dir" 2>&1)
-  if [ $? -eq 0 ]; then
+  if out=$(arduino-cli compile --fqbn "$FQBN" --build-path "$WORK/$name/build" "$dir" 2>&1); then
     local flash ram
     flash=$(echo "$out" | sed -nE 's/^Sketch uses ([0-9]+) bytes.*/\1/p')
     ram=$(echo "$out" | sed -nE 's/^Global variables use ([0-9]+) bytes.*/\1/p')
@@ -65,8 +64,8 @@ build() {  # name, config text
 rejects() {  # name, expected message, config text
   local name=$1 expect=$2 dir out
   dir=$(prepare "reject-$name" "$3")
-  out=$(arduino-cli compile --fqbn "$FQBN" --build-path "$WORK/reject-$name/build" "$dir" 2>&1)
-  if [ $? -ne 0 ] && echo "$out" | grep -qF -- "$expect"; then
+  if ! out=$(arduino-cli compile --fqbn "$FQBN" --build-path "$WORK/reject-$name/build" "$dir" 2>&1) \
+    && grep -qF -- "$expect" <<<"$out"; then
     ok "rejects $name"
   else
     bad "should reject $name with \"$expect\""

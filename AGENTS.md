@@ -59,8 +59,9 @@ tools/build-all.sh --quick    # one build per machine type + the checks
 tools/build.sh -p /dev/cu.usbserial-XXXX -m   # flash a test board and watch the log
 ```
 
-GitHub Actions (`.github/workflows/firmware.yml`) runs the host tests and
-`tools/build-all.sh` on every PR and push to `main`. Host tests live in
+GitHub Actions (`.github/workflows/firmware.yml`) runs ShellCheck on the
+`tools/` scripts, the host tests and `tools/build-all.sh` on every PR and push
+to `main`. Host tests live in
 `tests/host/` with small stand-ins for the ESP32 APIs in `tests/host/stubs/`;
 add one there when you change logic that can run without the board.
 
